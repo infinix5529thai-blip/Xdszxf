@@ -1,0 +1,337 @@
+-- Local WindUI
+
+-- ระบบดึง WindUI จาก Official Release พร้อมลิงก์สำรอง
+local function LoadWindUI()
+    local sources = {
+        "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua",
+        "https://tree-hub.esp-soft.workers.dev/WindUI",
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    }
+    
+    for _, url in ipairs(sources) do
+        local success, result = pcall(function()
+            return loadstring(game:HttpGet(url))()
+        end)
+        if success and result then
+            return result
+        end
+    end
+    return nil
+end
+
+WindUI = LoadWindUI()
+
+if not WindUI then
+    warn("ไม่สามารถดึงข้อมูล WindUI Library ได้ กรุณาเช็คการเชื่อมต่อเน็ต")
+    return
+end
+
+-- สร้างหน้าต่าง UI
+local Window = Window or WindUI:CreateWindow({
+    Title = "FPS FLICK AIMBOT V1",
+    Icon = "crosshair",
+    Author = "WindUI",
+    Folder = "FPS_Flick_Settings",
+    Size = UDim2.fromOffset(560, 400),
+    Transparent = true,
+    Theme = "Dark",
+})
+
+-- ==================== แยกหมวดหมู่ด้านซ้าย ====================
+local AimTab = Window:Tab({
+    Title = "Aimbot",
+    Icon = "target",
+})
+
+local EspTab = Window:Tab({
+    Title = "ESP Systems",
+    Icon = "eye",
+})
+
+local MovementTab = Window:Tab({
+    Title = "Movement",
+    Icon = "zap",
+})
+
+-- ==================== ตัวแปรสถานะ ====================
+local AimbotEnabled = false
+local WallCheckEnabled = true
+local EspBoxEnabled = false
+local EspLineEnabled = false
+
+-- ตัวแปร Movement
+local SpeedHackEnabled = false
+local WalkSpeedValue = 20
+local JumpPowerValue = 50
+local InfiniteJumpEnabled = false
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- ==================== 1. AIMBOT (ล็อกหัว + เช็คกำแพง) ====================
+AimTab:Toggle({
+    Title = "เปิดใช้งาน AIMBOT (ล็อกหัว)",
+    Desc = "ล็อกเป้าหมายที่หัวอย่างแม่นยำและติดแน่น",
+    Value = false,
+    Callback = function(State)
+        AimbotEnabled = State
+    end
+})
+
+AimTab:Toggle({
+    Title = "ไม่ล็อกทะลุกำแพง (WallCheck)",
+    Desc = "Aimbot จะทำงานเฉพาะตัวละครที่มองเห็นได้เท่านั้น",
+    Value = true,
+    Callback = function(State)
+        WallCheckEnabled = State
+    end
+})
+
+local function IsVisible(targetPart)
+    if not WallCheckEnabled then return true end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (targetPart.Position - origin)
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local filterList = {LocalPlayer.Character}
+    if targetPart.Parent then
+        table.insert(filterList, targetPart.Parent)
+    end
+    raycastParams.FilterDescendantsInstances = filterList
+    raycastParams.IgnoreWater = true
+    
+    local raycastResult = workspace:Raycast(origin, direction, raycastParams)
+    
+    if raycastResult == nil then
+        return true
+    end
+    
+    return false
+end
+
+local function GetClosestPlayerToHead()
+    local closestPlayer = nil
+    local shortestDistance = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Head") and player.Character:FindFirstChild("Humanoid") then
+            if player.Character.Humanoid.Health > 0 then
+                local head = player.Character.Head
+                
+                if IsVisible(head) then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    
+                    if onScreen then
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if distance < shortestDistance then
+                            shortestDistance = distance
+                            closestPlayer = head
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closestPlayer
+end
+
+RunService.RenderStepped:Connect(function()
+    if AimbotEnabled then
+        local targetHead = GetClosestPlayerToHead()
+        if targetHead then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetHead.Position)
+        end
+    end
+end)
+
+-- ==================== 2. ESP (BOX & LINE) ====================
+EspTab:Toggle({
+    Title = "ESP Box (กล่องครอบตัว)",
+    Desc = "เน้นขอบตัวผู้เล่นให้อยู่ในกล่องมองเห็นทะลุกำแพง",
+    Value = false,
+    Callback = function(State)
+        EspBoxEnabled = State
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and plr.Character then
+                local hl = plr.Character:FindFirstChild("ESPHighlight")
+                if hl then
+                    hl.Enabled = State
+                end
+            end
+        end
+    end
+})
+
+EspTab:Toggle({
+    Title = "ESP Line (เส้นโยง)",
+    Desc = "วาดเส้นชี้ตรงไปยังเป้าหมาย",
+    Value = false,
+    Callback = function(State)
+        EspLineEnabled = State
+    end
+})
+
+local lines = {}
+
+local function ApplyESP(plr)
+    if plr == LocalPlayer then return end
+    
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(0.5)
+        if EspBoxEnabled then
+            local hl = char:FindFirstChild("ESPHighlight") or Instance.new("Highlight")
+            hl.Name = "ESPHighlight"
+            hl.FillTransparency = 0.5
+            hl.OutlineTransparency = 0
+            hl.FillColor = Color3.fromRGB(255, 0, 0)
+            hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+            hl.Parent = char
+            hl.Enabled = EspBoxEnabled
+        end
+    end)
+
+    if plr.Character then
+        local hl = plr.Character:FindFirstChild("ESPHighlight") or Instance.new("Highlight")
+        hl.Name = "ESPHighlight"
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
+        hl.FillColor = Color3.fromRGB(255, 0, 0)
+        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+        hl.Parent = plr.Character
+        hl.Enabled = EspBoxEnabled
+    end
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    ApplyESP(plr)
+end
+Players.PlayerAdded:Connect(ApplyESP)
+
+RunService.RenderStepped:Connect(function()
+    if not EspLineEnabled then
+        for _, l in pairs(lines) do l:Remove() end
+        lines = {}
+        return
+    end
+
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = plr.Character.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+            
+            if onScreen then
+                if not lines[plr] then
+                    local line = Drawing.new("Line")
+                    line.Thickness = 1.5
+                    line.Color = Color3.fromRGB(255, 0, 0)
+                    lines[plr] = line
+                end
+                
+                lines[plr].From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                lines[plr].To = Vector2.new(screenPos.X, screenPos.Y)
+                lines[plr].Visible = true
+            else
+                if lines[plr] then
+                    lines[plr].Visible = false
+                end
+            end
+        else
+            if lines[plr] then
+                lines[plr].Visible = false
+            end
+        end
+    end
+end)
+
+-- ==================== 3. MOVEMENT (เพิ่มปุ่มเปิด-ปิด Speed Hack) ====================
+MovementTab:Paragraph({
+    Title = "ระบบควบคุมการเคลื่อนไหว",
+    Desc = "ตั้งค่าความเร็วและระบบการกระโดด",
+})
+
+-- ปุ่มเปิด-ปิด Speed Hack
+MovementTab:Toggle({
+    Title = "เปิดใช้งาน Speed Hack",
+    Desc = "เปิด/ปิด การใช้งานความเร็วเดินที่ตั้งไว้",
+    Value = false,
+    Callback = function(State)
+        SpeedHackEnabled = State
+        -- ถ้าปิดการใช้งาน ให้คืนค่าความเร็วเดินกลับเป็นค่าปกติของเกม (16) ทันที
+        pcall(function()
+            if not State and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.WalkSpeed = 16
+            end
+        end)
+    end
+})
+
+MovementTab:Slider({
+    Title = "ความเร็วเดิน (Speed)",
+    Desc = "ปรับแต่งความเร็ว (ค่าเริ่มต้น: 20)",
+    Min = 16,
+    Max = 150,
+    Default = 20,
+    Value = 20,
+    Callback = function(Value)
+        WalkSpeedValue = Value
+    end
+})
+
+MovementTab:Slider({
+    Title = "Jump Power (พลังกระโดด)",
+    Desc = "ปรับแต่งความสูงในการกระโดด",
+    Min = 50,
+    Max = 300,
+    Default = 50,
+    Value = 50,
+    Callback = function(Value)
+        JumpPowerValue = Value
+    end
+})
+
+MovementTab:Toggle({
+    Title = "Infinite Jump (กระโดดกลางอากาศ)",
+    Desc = "อนุญาตให้กระโดดต่อเนื่องกลางอากาศได้",
+    Value = false,
+    Callback = function(State)
+        InfiniteJumpEnabled = State
+    end
+})
+
+-- ดักจับการกดกระโดดสำหรับ Infinite Jump
+UserInputService.JumpRequest:Connect(function()
+    if InfiniteJumpEnabled then
+        pcall(function()
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end)
+    end
+end)
+
+-- ควบคุมการอัปเดตค่าความเร็วและพลังกระโดด
+RunService.Stepped:Connect(function()
+    pcall(function()
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+            local humanoid = LocalPlayer.Character.Humanoid
+            
+            -- ทำงานเฉพาะตอนที่เปิดสวิตช์ Speed Hack เท่านั้น
+            if SpeedHackEnabled then
+                humanoid.WalkSpeed = WalkSpeedValue
+            end
+            
+            if humanoid.UseJumpPower then
+                humanoid.JumpPower = JumpPowerValue
+            else
+                humanoid.JumpHeight = JumpPowerValue / 5
+            end
+        end
+    end)
+end)
